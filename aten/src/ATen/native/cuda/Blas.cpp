@@ -2087,7 +2087,9 @@ _scaled_rowwise_rowwise(
   TORCH_CHECK(scale_a.numel() == mat_a.size(0) && scale_a.scalar_type() == kFloat, "scale_a must have ", mat_a.size(0), " Float elements, got ", scale_a.numel())
   TORCH_CHECK(scale_b.numel() == mat_b.size(1) && scale_b.scalar_type() == kFloat, "scale_b must have ", mat_b.size(1), " Float elements, got ", scale_b.numel())
 
-  //at::native::resize_output(out, {mat_a.sizes()[0], mat_b.sizes()[1]});
+  auto scaling_choice_a = ScalingType::RowWise;
+  auto scaling_choice_b = ScalingType::RowWise;
+  //
   // NVIDIA's cuBLAS only started supporting row-wise scaling in version 12.9,
   // and only for compute capability 9.0+. In other cases we use CUTLASS.
 #ifndef USE_ROCM
@@ -2108,38 +2110,19 @@ _scaled_rowwise_rowwise(
     return out;
   }
 #else
-  if (scaling_choice_a == ScalingType::RowWise && scaling_choice_b == ScalingType::RowWise) {
-    // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
-    Tensor b = mat2;
-    if (_scaled_mm_is_fnuz()) {
-      TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fnuz);
-    }
-    else {
-      TORCH_CHECK(b.dtype() == at::kFloat8_e4m3fn);
-    }
-    // Until more than bf16 is supported.
-    TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
-         "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
-  }
-  else if (scaling_choice_a == ScalingType::BlockWise1x32 && scaling_choice_b == ScalingType::BlockWise1x32) {
-    #if ROCM_VERSION >= 70000
-    TORCH_CHECK(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
-                "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
 
-    TORCH_CHECK(mat1.size(0) % 32 == 0 && mat1.size(1) % 32 == 0 &&
-                mat2.size(0) % 32 == 0 && mat2.size(1) % 32 == 0,
-                "Matrix dimensions must be multiples of 32 for block-wise scaling");
-
-    TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 ||
-                out.scalar_type() == ScalarType::Half,
-                "Block-wise scaling only supports BFloat16 or Half output types");
-#else
-    TORCH_CHECK(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
-#endif
+  // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
+  //Tensor b = mat_b;
+  if (_scaled_mm_is_fnuz()) {
+    TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fnuz);
   }
+  else {
+    TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn);
+  }
+  // Until more than bf16 is supported.
+  TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16,
+       "hipblaslt rowwise _scaled_mm only supports BFloat16 output but got ", out.scalar_type());
 #endif
-  auto scaling_choice_a = ScalingType::RowWise;
-  auto scaling_choice_b = ScalingType::RowWise;
 
   _cutlass_scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
 
@@ -2259,6 +2242,23 @@ _scaled_mxfp8_mxfp8(
   auto scaling_choice_a = ScalingType::BlockWise1x32;
   auto scaling_choice_b = ScalingType::BlockWise1x32;
 
+#ifdef USE_ROCM
+#if ROCM_VERSION >= 70000
+  TORCH_CHECK(at::detail::getCUDAHooks().isGPUArch({"gfx950"}),
+              "Block-wise scaling for Float8_e8m0fnu is only supported on gfx950");
+
+  TORCH_CHECK(mat_a.size(0) % 32 == 0 && mat_a.size(1) % 32 == 0 &&
+              mat_b.size(0) % 32 == 0 && mat_b.size(1) % 32 == 0,
+              "Matrix dimensions must be multiples of 32 for block-wise scaling");
+
+  TORCH_CHECK(out.scalar_type() == ScalarType::BFloat16 ||
+              out.scalar_type() == ScalarType::Half,
+              "Block-wise scaling only supports BFloat16 or Half output types");
+#else
+    TORCH_CHECK(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
+#endif
+#endif
+
   return _cutlass_scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
 }
 
@@ -2271,6 +2271,9 @@ _scaled_nvfp4_nvfp4(
           const c10::ScalarType out_dtype,
           const bool single_scale,
           Tensor& out) {
+#ifdef USE_ROCM
+  TORCH_CHECK(false, "NVFP4 scaling not supported on ROCM");
+#endif
   TORCH_CHECK(single_scale, "Only single-scaled NVFP4 currently supported");
   // Restrictions:
   // A, B are FP4, scales are e8m0, A: shape K//32, B: K, N//32
@@ -2297,6 +2300,27 @@ _scaled_nvfp4_nvfp4(
 }
 
 
+// V2: Computes matrix multiply + bias while applying scaling to input and output matrices
+// Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
+// If output matrix type is 16 or 32-bit type, scale_result is not applied.
+// Known limitations:
+//  - Only works if mat1 is row-major and mat2 is column-major
+//  - Only works if matrices sizes are divisible by 32
+//  - If 1-dimensional tensors are used then scale_a should be size = mat1.size(0)
+//    and scale_b should have size = to mat2.size(1)
+//  Arguments:
+//    - `mat1`: the first operand of the matrix multiply, can be type `torch.float8_e4m3fn` or `torch.float8_e5m2`
+//    - `mat2`: the second operand of the matrix multiply, can be type `torch.float8_e4m3fn` or `torch.float8_e5m2`
+//    - `scale_a`: a tensor with the inverse scale of `mat1`, whose shape/strides/dtype depend on the scaling scheme
+//    - `scale_recipe_a`: An integer corresponding to an enum describing the scaling scheme used for `scale_a`
+//    - `swizzle_a`: An integer corresponding to a `SwizzleType` enum describing the swizzling scheme for `scale_a`
+//    - `scale_b`: a tensor with the inverse scale of `mat2`, whose shape/strides/dtype depend on the scaling scheme
+//    - `scale_recipe_b`: An integer corresponding to an enum describing the scaling scheme used for `scale_b`
+//    - `swizzle_b`: An integer corresponding to a `SwizzleType` enum describing the swizzling scheme for `scale_b`
+//    - `bias`: the bias, can be type `torch.float16` or `torch.bfloat16`
+//    - `out_dtype`: the output dtype, can either be a float8 or a higher precision floating point type
+//    - `use_fast_accum`: if true, enables fast float8 accumulation. Backends may ignore this option if not applicable.
+//    - `out`: a reference to the output tensor
 Tensor&
 _scaled_mm_cuda_v2_out(
           const Tensor& mat_a, const Tensor& mat_b,
