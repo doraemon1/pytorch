@@ -3231,6 +3231,128 @@ class TestUnbacked(TestCase):
         with self.assertRaises(RuntimeError):
             func(a, torch.rand(2, 1))
 
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_do_not_guard_unbacked_inputs1(self):
+        @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
+        def func(a, b):
+            a.expand(b.shape)
+            return a * 10
+
+        a = torch.rand(1, 1)
+        b = torch.rand(1, 1)
+
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 1)
+
+        log_stream, ctx = logs_to_string("torch._dynamo.guards", "guards")
+        with ctx():
+            func(a, b)
+            func(torch.rand(4, 5), torch.rand(4, 5))
+
+        guards = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertFalse("SYMBOLIC_SHAPE_GUARD" in guards)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_do_not_guard_unbacked_inputs2(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(fullgraph=True, dynamic=True, backend=cnt)
+        def func(a):
+            torch._check(a.size()[0] < 6)
+            return a * 10
+
+        a = torch.rand(4, 10)
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        log_stream, ctx = logs_to_string("torch._dynamo.guards", "guards")
+        with ctx():
+            func(a)
+            with self.assertRaises(RuntimeError):
+                func(torch.rand(9, 10))
+        guards = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertFalse("SYMBOLIC_SHAPE_GUARD" in guards)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_do_not_guard_unbacked_inputs3(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(fullgraph=True, dynamic=True, backend=cnt)
+        def func(a):
+            # this should generate runtime assertio and no guard.
+            torch._check(a.size()[0] == a.size()[1])
+            # This should generate guard
+            torch._check(a.size()[1] < 10)
+            return a * 10
+
+           # no reocmpile if we pass 9, 8
+        # recompile if we pass 11
+        a = torch.rand(4,4)
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.mark_dynamic(a, 1)
+        func(a)
+
+        # no recompile
+        try :
+            func(torch.rand(4, 7))
+        except:
+            pass
+        # recompile
+        try :
+            func(torch.rand(100, 100))
+        except:
+            pass
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_do_not_guard_unbacked_inputs3(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(fullgraph=True, dynamic=True, backend=cnt)
+        def func(a):
+            # this should generate runtime assertio and no guard.
+            torch._check(a.size()[0] == a.size()[1])
+            # This should generate guard
+            torch._check(a.size()[1] < 10)
+            return a * 10
+
+           # no reocmpile if we pass 9, 8
+        # recompile if we pass 11
+        a = torch.rand(4,4)
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.mark_dynamic(a, 1)
+        func(a)
+
+        # no recompile
+        try :
+            func(torch.rand(4, 7))
+        except:
+            pass
+        # recompile
+        try :
+            func(torch.rand(100, 100))
+        except:
+            pass
+
+
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_do_not_guard_unbacked_inputs4(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(fullgraph=True, dynamic=True, backend=cnt)
+        def func(a):
+            return a*10
+
+           # no reocmpile if we pass 9, 8
+        # recompile if we pass 11
+        a = torch.rand(1,2,3,4,5)
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        torch._dynamo.decorators.mark_unbacked(a, 2)
+        torch._dynamo.decorators.mark_unbacked(a, 3)
+        torch._dynamo.decorators.mark_unbacked(a, 4)
+        func(a)
 
 class TestUbackedOps(TestCase):
     @fresh_cache()

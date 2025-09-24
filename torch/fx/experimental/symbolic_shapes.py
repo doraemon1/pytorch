@@ -5246,7 +5246,8 @@ class ShapeEnv:
         default.
         """
         self.log.info("produce_guards")
-
+        # import fbvscode
+        # fbvscode.set_trace()
         # Check if we get to the same ShapeEnv state by replaying the recorded events.
         # This will create a new ShapeEnv instance, and call all recorded function
         # calls on this new instance. Finally, it will check whether this new instance
@@ -5467,14 +5468,18 @@ class ShapeEnv:
         def track_symint(
             source: Source, val: IntLikeType, constraint: DimConstraint = None
         ) -> None:
-            log.debug("track_symint %s %s %s", LazyString(source.name), val, constraint)
+            log.debug("track_symint %s %s %s", LazyString(source.name), val.node._expr if isinstance(val, SymInt) else val , constraint)
             assert not isinstance(val, SymInt) or is_symbolic(val)
 
             if isinstance(val, SymInt) and val.node.maybe_as_int() is not None:
                 val = val.node.maybe_as_int()
 
             if isinstance(val, SymInt):
-                s = val.node.expr
+                s = val.node._expr
+
+                if  has_free_unbacked_symbols(s):
+                    return
+
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
                     if constraint is not None and not isinstance(
@@ -5519,7 +5524,11 @@ class ShapeEnv:
                             hint=functools.partial(hint, s),
                         )
 
-                input_guards.append((source, s))
+                # We do not want to guard on unbacked symbols. All replacements and
+                # bounds should have originated from torch._checks, so runtime
+                # assertions should be there to cover those guards.
+                if not has_free_unbacked_symbols(s):
+                    input_guards.append((source, s))
             else:
                 s = sympy.Integer(val)
                 input_guards.append((source, s))
@@ -5650,6 +5659,8 @@ class ShapeEnv:
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
         all_exprs: list[list[str]] = [[] for _ in langs]
+        # import fbvscode
+        # fbvscode.set_trace()
         self.dim_constraints = DimConstraints(
             symbol_to_source,
             self.var_to_val,
@@ -5842,6 +5853,12 @@ class ShapeEnv:
         # 3. Every symbol must be within its value range (this handles 0/1
         # specialization too).
         for symbol, sources in symbol_to_source.items():
+            # We do not want to guard on unbacked symbols. All replacements and
+            # bounds should have originated from torch._checks, so runtime
+            # assertions should be there to cover those guards.
+            if self.is_unbacked_symint(symbol):
+                continue
+
             r = self.var_to_range.get(symbol)
             if r is None:
                 continue
