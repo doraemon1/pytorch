@@ -130,9 +130,10 @@ def _split_block_mask(
         chunk_block_masks: List of chunked block masks
     """
 
-    assert block_mask.kv_num_blocks.size(0) >= num_chunks, (
-        "Block mask has fewer batch size than the number of chunks. "
-    )
+    if not block_mask.kv_num_blocks.size(0) >= num_chunks:
+        raise AssertionError(
+            "Block mask has fewer batch size than the number of chunks. "
+        )
 
     batch_dim = 0
     kv_num_blocks_chunks = torch.tensor_split(
@@ -192,9 +193,10 @@ def _split_tensor(
         chunk_tensors: List of chunked tensors
     """
 
-    assert tensor.size(spec.split_dim) >= num_chunks, (
-        f"Tensor size {tensor.size(spec.split_dim)} is smaller than num_chunks"
-    )
+    if not tensor.size(spec.split_dim) >= num_chunks:
+        raise AssertionError(
+            f"Tensor size {tensor.size(spec.split_dim)} is smaller than num_chunks"
+        )
     chunk_tensors = torch.tensor_split(tensor, num_chunks, spec.split_dim)
 
     if not _debug_mask_minibatches:
@@ -238,11 +240,13 @@ def _shard_dict_of_args(
     if not args_dict:
         return [{} for _ in range(num_chunks)]
 
-    assert len(args_dict) == len(args_chunk_spec), (
-        f"args_dict.keys() = {list(args_dict.keys())} "
-        f"args_chunk_spec.keys() = {list(args_chunk_spec.keys())}"
-    )
-    assert args_chunk_spec is not None  # Should have been set by caller
+    if not len(args_dict) == len(args_chunk_spec):
+        raise AssertionError(
+            f"args_dict.keys() = {list(args_dict.keys())} "
+            f"args_chunk_spec.keys() = {list(args_chunk_spec.keys())}"
+        )
+    if args_chunk_spec is None:
+        raise AssertionError("args_chunk_spec should have been set by caller")
 
     values, tree_spec = tree_flatten(args_dict)
     chunk_specs, _ = tree_flatten(args_chunk_spec)
@@ -253,11 +257,14 @@ def _shard_dict_of_args(
         if spec is _Replicate:
             split_sizes.append(num_chunks)
         elif isinstance(v, torch.Tensor):
-            assert isinstance(spec, TensorChunkSpec)
+            if not isinstance(spec, TensorChunkSpec):
+                raise AssertionError(f"Expected TensorChunkSpec, got {type(spec)}")
             split_sizes.append(v.size(spec.split_dim))
         elif isinstance(v, BlockMask):
-            assert isinstance(spec, TensorChunkSpec)
-            assert spec.split_dim == 0, "BlockMask only supports split_dim=0"
+            if not isinstance(spec, TensorChunkSpec):
+                raise AssertionError(f"Expected TensorChunkSpec, got {type(spec)}")
+            if not spec.split_dim == 0:
+                raise AssertionError("BlockMask only supports split_dim=0")
             split_sizes.append(v.kv_num_blocks.size(0))
         else:
             raise ValueError(
@@ -475,7 +482,8 @@ def merge_chunks(
                 # Infer size of individual chunks by running `tensor_split` again
                 overall_shape = partial_values[0].shape
                 for val in partial_values[1:]:
-                    assert val.shape == overall_shape
+                    if not val.shape == overall_shape:
+                        raise AssertionError(f"Expected shape {overall_shape}, got {val.shape}")
                 meta_chunks = torch.tensor_split(
                     torch.empty(*overall_shape, device="meta"),
                     sections=len(partial_values),
@@ -484,7 +492,8 @@ def merge_chunks(
 
                 values_to_cat = []
                 chunk_start_idx = 0
-                assert len(partial_values) == len(meta_chunks)
+                if not len(partial_values) == len(meta_chunks):
+                    raise AssertionError(f"Expected len(partial_values) == len(meta_chunks), got {len(partial_values)} != {len(meta_chunks)}")
                 for partial_value, meta_chunk in zip(partial_values, meta_chunks):
                     chunk_end_idx = chunk_start_idx + meta_chunk.size(arg.split_dim)
 
@@ -511,7 +520,8 @@ def merge_chunks(
         else:
             value = chunks_flattened[0][arg_idx]
             for chunk_idx in range(1, len(chunks_flattened)):
-                assert chunks_flattened[chunk_idx][arg_idx] == value
+                if not chunks_flattened[chunk_idx][arg_idx] == value:
+                    raise AssertionError(f"Expected {value}, got {chunks_flattened[chunk_idx][arg_idx]}")
             args_flattened.append(value)
 
     # Stage 4: Unflatten combined args
