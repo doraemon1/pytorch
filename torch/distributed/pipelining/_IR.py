@@ -778,7 +778,9 @@ class Pipe(torch.nn.Module):
                 - user: a submodule node that uses `node`.
             """
             if not len(user.kwargs) == 0:
-                raise AssertionError(f"Expected user.kwargs to be empty, got {len(user.kwargs)}")
+                raise AssertionError(
+                    f"Expected user.kwargs to be empty, got {len(user.kwargs)}"
+                )
             use_idxs = [i for i, arg in enumerate(user.args) if arg == node]
             if not len(use_idxs) == 1:
                 raise AssertionError(f"Expected 1 use index, got {len(use_idxs)}")
@@ -881,7 +883,9 @@ class Pipe(torch.nn.Module):
                 )
             for user in node.users:
                 if not user.op == "call_module":
-                    raise AssertionError(f"Expected user.op to be 'call_module', got {user.op}")
+                    raise AssertionError(
+                        f"Expected user.op to be 'call_module', got {user.op}"
+                    )
                 # Move parameter into submodule
                 move_param_to_callee(
                     split,
@@ -969,7 +973,9 @@ class Pipe(torch.nn.Module):
             # And (2): remove `get_attr` node from submod's arg list
             for user in copy.copy(node.users):
                 if not user.op == "call_module":
-                    raise AssertionError(f"Expected user.op to be 'call_module', got {user.op}")
+                    raise AssertionError(
+                        f"Expected user.op to be 'call_module', got {user.op}"
+                    )
                 delete_user_reference(node, user)
             # And (3): remove the `get_attr` node from the root graph.
             split.graph.erase_node(node)

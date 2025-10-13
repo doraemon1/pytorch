@@ -1262,7 +1262,9 @@ def _add_send_recv(
                 del compute_actions[rank]
             progress = True
         if not progress:
-            raise AssertionError("Malformed compute schedule, can't schedule sends/recvs")
+            raise AssertionError(
+                "Malformed compute schedule, can't schedule sends/recvs"
+            )
     return comm_actions
 
 
@@ -1277,7 +1279,7 @@ def _validate_schedule(
             f"Schedule has incorrect number of ranks - expected {pp_group_size}, actual {len(actions)}"
         )
     for rank in range(pp_group_size):
-        if not (rank in actions):
+        if rank not in actions:
             raise AssertionError(f"Schedule is missing actions for rank {rank}")
 
     # We will count all the actions per stage and ensure they happen in a valid order
@@ -1857,7 +1859,9 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                 self.pipeline_order_with_comms[rank] = []
                 for action in actions[rank]:
                     if not (action is not None):
-                        raise AssertionError(f"Expected action to be not None, got {type(action)}")
+                        raise AssertionError(
+                            f"Expected action to be not None, got {type(action)}"
+                        )
                     self.pipeline_order_with_comms[rank].append(action)
             # TODO what level of validation should we offer for compute+comms schedule?
         elif format == "compute_only":
@@ -1919,7 +1923,9 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     writer.writerow(self.pipeline_order[rank])
         elif format == "compute_comms":
             if not (self.pipeline_order_with_comms is not None):
-                raise AssertionError("Must initialize compute_comms schedule before dump_csv")
+                raise AssertionError(
+                    "Must initialize compute_comms schedule before dump_csv"
+                )
             with open(filename, "w", newline="") as csvfile:
                 writer = csv.writer(csvfile)
                 for rank in self.pipeline_order_with_comms:
@@ -1973,7 +1979,7 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     op.wait()
                 del unshard_ops[stage_idx]
                 unsharded_stages.add(stage_idx)
-            if not (stage_idx in unsharded_stages):
+            if stage_idx not in unsharded_stages:
                 raise AssertionError(f"Attempted to compute on sharded {stage_idx=}")
 
         def _perform_action(action: _Action) -> None:
@@ -2023,7 +2029,10 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                 )
             elif comp_type == UNSHARD:
                 if stage_uses_fsdp:
-                    if not (stage_idx not in unsharded_stages and stage_idx not in unshard_ops):
+                    if not (
+                        stage_idx not in unsharded_stages
+                        and stage_idx not in unshard_ops
+                    ):
                         raise AssertionError(f"Unsharding the same {stage_idx=} twice")
                     for submodule in stage.submod.modules():
                         if not isinstance(submodule, FSDPModule):
@@ -2032,10 +2041,14 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                         unshard_ops[stage_idx].append(handle)
             elif comp_type == RESHARD:
                 if stage_uses_fsdp:
-                    if not (stage_idx in unsharded_stages):
-                        raise AssertionError(f"Resharding {stage_idx=} without unsharding")
+                    if stage_idx not in unsharded_stages:
+                        raise AssertionError(
+                            f"Resharding {stage_idx=} without unsharding"
+                        )
                     if not (stage_idx not in unshard_ops):
-                        raise AssertionError(f"Resharding {stage_idx=} before finishing unshard")
+                        raise AssertionError(
+                            f"Resharding {stage_idx=} before finishing unshard"
+                        )
                     for submodule in stage.submod.modules():
                         if not isinstance(submodule, FSDPModule):
                             continue
@@ -2050,7 +2063,9 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     and not is_prev_stage_on_this_rank
                 ):
                     if (stage_idx, mb_index) not in self.fwd_recv_ops:
-                        raise AssertionError(f"Computing {action=} before receiving input")
+                        raise AssertionError(
+                            f"Computing {action=} before receiving input"
+                        )
                     _wait_batch_p2p(self.fwd_recv_ops.pop((stage_idx, mb_index)))
 
                 output = stage.forward_one_chunk(
@@ -2077,7 +2092,9 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     and not is_next_stage_on_this_rank
                 ):
                     if (stage_idx, mb_index) not in self.bwd_recv_ops:
-                        raise AssertionError(f"Attempted to run compute {action=} before receiving input")
+                        raise AssertionError(
+                            f"Attempted to run compute {action=} before receiving input"
+                        )
                     _wait_batch_p2p(self.bwd_recv_ops.pop((stage_idx, mb_index)))
                 loss = self._maybe_get_loss(stage, mb_index)
                 backward_counter[stage_idx] += 1
@@ -2100,7 +2117,9 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
 
                 if not stage.is_last and not is_next_stage_on_this_rank:
                     if (stage_idx, mb_index) not in self.bwd_recv_ops:
-                        raise AssertionError(f"Attempted to run compute {action=} before receiving input")
+                        raise AssertionError(
+                            f"Attempted to run compute {action=} before receiving input"
+                        )
                     _wait_batch_p2p(self.bwd_recv_ops.pop((stage_idx, mb_index)))
                 loss = self._maybe_get_loss(stage, mb_index)
                 stage.backward_one_chunk(
@@ -2664,7 +2683,9 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
                 if actions[rank][timestamp] is not None:
                     temp_action = actions[rank][timestamp]
                     if not (temp_action is not None):
-                        raise AssertionError(f"Expected temp_action to be not None, got {type(temp_action)}")
+                        raise AssertionError(
+                            f"Expected temp_action to be not None, got {type(temp_action)}"
+                        )
                     stage_index, op, microbatch, _ = temp_action
                     if not need_bubble(
                         stage_index, op, microbatch, num_stages_global, seen_ops
@@ -2861,9 +2882,13 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             w0_cnt += 1
 
         if not (w0_cnt == b0_cnt and b0_cnt == f0_cnt):
-            raise AssertionError(f"Expected w0_cnt == b0_cnt == f0_cnt, got w0_cnt={w0_cnt}, b0_cnt={b0_cnt}, f0_cnt={f0_cnt}")
+            raise AssertionError(
+                f"Expected w0_cnt == b0_cnt == f0_cnt, got w0_cnt={w0_cnt}, b0_cnt={b0_cnt}, f0_cnt={f0_cnt}"
+            )
         if not (w1_cnt == b1_cnt and b1_cnt == f1_cnt):
-            raise AssertionError(f"Expected w1_cnt == b1_cnt == f1_cnt, got w1_cnt={w1_cnt}, b1_cnt={b1_cnt}, f1_cnt={f1_cnt}")
+            raise AssertionError(
+                f"Expected w1_cnt == b1_cnt == f1_cnt, got w1_cnt={w1_cnt}, b1_cnt={b1_cnt}, f1_cnt={f1_cnt}"
+            )
         # We use max() in the n_micro computation above, so we may need to
         # remove redundant microbatches
         rank_ops = [

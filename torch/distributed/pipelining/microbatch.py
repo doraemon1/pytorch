@@ -499,7 +499,9 @@ def merge_chunks(
                 overall_shape = partial_values[0].shape
                 for val in partial_values[1:]:
                     if not val.shape == overall_shape:
-                        raise AssertionError(f"Expected shape {overall_shape}, got {val.shape}")
+                        raise AssertionError(
+                            f"Expected shape {overall_shape}, got {val.shape}"
+                        )
                 meta_chunks = torch.tensor_split(
                     torch.empty(*overall_shape, device="meta"),
                     sections=len(partial_values),
@@ -509,7 +511,9 @@ def merge_chunks(
                 values_to_cat = []
                 chunk_start_idx = 0
                 if not len(partial_values) == len(meta_chunks):
-                    raise AssertionError(f"Expected len(partial_values) == len(meta_chunks), got {len(partial_values)} != {len(meta_chunks)}")
+                    raise AssertionError(
+                        f"Expected len(partial_values) == len(meta_chunks), got {len(partial_values)} != {len(meta_chunks)}"
+                    )
                 for partial_value, meta_chunk in zip(partial_values, meta_chunks):
                     chunk_end_idx = chunk_start_idx + meta_chunk.size(arg.split_dim)
 
@@ -537,7 +541,9 @@ def merge_chunks(
             value = chunks_flattened[0][arg_idx]
             for chunk_idx in range(1, len(chunks_flattened)):
                 if not chunks_flattened[chunk_idx][arg_idx] == value:
-                    raise AssertionError(f"Expected {value}, got {chunks_flattened[chunk_idx][arg_idx]}")
+                    raise AssertionError(
+                        f"Expected {value}, got {chunks_flattened[chunk_idx][arg_idx]}"
+                    )
             args_flattened.append(value)
 
     # Stage 4: Unflatten combined args

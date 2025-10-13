@@ -67,14 +67,18 @@ def get_schedule_ops(
         if num_stages_per_rank is None:
             num_stages_per_rank = 1
         if not num_stages_per_rank == 1:
-            raise AssertionError(f"Expected num_stages_per_rank to be 1, got {num_stages_per_rank}")
+            raise AssertionError(
+                f"Expected num_stages_per_rank to be 1, got {num_stages_per_rank}"
+            )
         stages = mock_pipeline_stage
         stages.num_stages = num_stages_per_rank * pp_degree
     elif issubclass(schedule_class, PipelineScheduleMulti):
         if num_stages_per_rank is None:
             num_stages_per_rank = 2
         if not num_stages_per_rank >= 2:
-            raise AssertionError(f"Expected num_stages_per_rank >= 2, got {num_stages_per_rank}")
+            raise AssertionError(
+                f"Expected num_stages_per_rank >= 2, got {num_stages_per_rank}"
+            )
         stages = [mock_pipeline_stage for _ in range(num_stages_per_rank)]
         for stage in stages:
             stage.num_stages = num_stages_per_rank * pp_degree
@@ -284,9 +288,7 @@ def add_schedule_op_spacing(
                 ] = timestep + cumulative_time
         else:
             if action.microbatch_index is None:
-                raise AssertionError(
-                    f"Action {action} has None microbatch_index"
-                )
+                raise AssertionError(f"Action {action} has None microbatch_index")
             scheduled_ops[
                 OpKey(action.stage_index, comp_type, action.microbatch_index)
             ] = completion_time

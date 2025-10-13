@@ -401,9 +401,7 @@ class _PipelineStageBase(ABC):
         Does not detach or set '_requires_grad'.
         """
         if not isinstance(next_stage_bwd_outputs, tuple):
-            raise AssertionError(
-                f"Expected tuple, got {type(next_stage_bwd_outputs)}"
-            )
+            raise AssertionError(f"Expected tuple, got {type(next_stage_bwd_outputs)}")
 
         if not self.has_backward:
             raise AssertionError(
@@ -418,9 +416,7 @@ class _PipelineStageBase(ABC):
                     f"expected tensor values as outputs from prev stage, got {type(tensor)}"
                 )
             if not isinstance(info, _RecvInfo):
-                raise AssertionError(
-                    f"Expected a recv info, got {type(info)}"
-                )
+                raise AssertionError(f"Expected a recv info, got {type(info)}")
             info.buffer = tensor
 
     def get_fwd_recv_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
@@ -1138,9 +1134,7 @@ class _PipelineStage(_PipelineStageBase):
                 arg_node = arg_node.args[0]
 
             if arg_node.op != "call_module":
-                raise AssertionError(
-                    f"Expecting call_module, got {arg_node.op}"
-                )
+                raise AssertionError(f"Expecting call_module, got {arg_node.op}")
             src_stage = self.get_stage_index_of_submod(arg_node.name)
 
             # Create a receive buffer for this placeholder

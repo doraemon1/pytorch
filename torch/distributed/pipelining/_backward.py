@@ -328,7 +328,9 @@ def stage_backward(
                         f"grad_value expected to have type {type(output_val)} but got {type(grad_val)}"
                     )
                 if not len(output_val) == len(grad_val):
-                    raise AssertionError(f"Expected len(output_val) == len(grad_val), got {len(output_val)} != {len(grad_val)}")
+                    raise AssertionError(
+                        f"Expected len(output_val) == len(grad_val), got {len(output_val)} != {len(grad_val)}"
+                    )
                 for ov, gv in zip(output_val, grad_val):
                     extract_tensors_with_grads(
                         ov,
@@ -341,7 +343,9 @@ def stage_backward(
                 if not isinstance(grad_val, dict):
                     raise AssertionError(f"Expected dict, got {type(grad_val)}")
                 if not set(output_val.keys()) == set(grad_val.keys()):
-                    raise AssertionError(f"Expected keys {set(output_val.keys())}, got {set(grad_val.keys())}")
+                    raise AssertionError(
+                        f"Expected keys {set(output_val.keys())}, got {set(grad_val.keys())}"
+                    )
                 for k in output_val.keys():
                     extract_tensors_with_grads(
                         output_val[k], grad_val[k], extract_tensors_with_grads
