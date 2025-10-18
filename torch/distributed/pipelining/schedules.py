@@ -1147,6 +1147,9 @@ def _merge_bw(
     return merged_actions
 
 
+#    TODO: recv operations do not finish until the data is opulated in them by NCCL
+
+
 def _add_send_recv(
     compute_actions: dict[int, list[_Action]],
     stage_to_rank: Callable[[int], int],
@@ -1157,6 +1160,10 @@ def _add_send_recv(
 
     For actions with sub-actions (OVERLAP_F_B) we ensure that all the subactions have been
     computed and the communication is ready
+
+    TODO: recv operations do not finish until the data is opulated in them by NCCL,
+    as a result, we have a warmup phase re-ordering which moves the SENDs earlier for
+    all the actions before the first backward
     """
     comm_actions: dict[int, list[_Action]] = {rank: [] for rank in compute_actions}
     prev_actions: dict[int, set[_Action]] = {rank: set() for rank in compute_actions}
@@ -1262,6 +1269,67 @@ def _add_send_recv(
                 del compute_actions[rank]
             progress = True
         assert progress, "Malformed compute schedule, can't schedule sends/recvs"
+
+    # Reorder warmup phase: prioritize SENDs before RECVs to avoid bubbles
+    def _reorder_warmup_comms(actions: list[_Action]) -> list[_Action]:
+        """During warmup (before any backward), move SEND_F before RECV_F to avoid bubbles."""
+        # Find the first backward action index
+        first_backward_idx = None
+        for idx, action in enumerate(actions):
+            if action is not None and action.computation_type in (
+                BACKWARD_INPUT,
+                FULL_BACKWARD,
+                SEND_B,
+                RECV_B,
+            ):
+                first_backward_idx = idx
+                break
+
+        if first_backward_idx is None:
+            first_backward_idx = len(actions)
+
+        # Split into warmup and rest
+        warmup = actions[:first_backward_idx]
+        rest = actions[first_backward_idx:]
+
+        # Reorder warmup: compute/send actions first, then recv actions
+        reordered_warmup = []
+        recv_buffer = []
+
+        for action in warmup:
+            if action is not None and action.computation_type == RECV_F:
+                recv_buffer.append(action)
+            else:
+                # Add buffered recvs before this compute action if it needs them
+                if (
+                    action is not None
+                    and action.computation_type == F
+                    and action.stage_index > 0
+                ):
+                    # Find and add the matching RECV_F for this compute
+                    matching_recv = None
+                    for recv in recv_buffer:
+                        if (
+                            recv.stage_index == action.stage_index
+                            and recv.microbatch_index == action.microbatch_index
+                        ):
+                            matching_recv = recv
+                            break
+                    if matching_recv:
+                        reordered_warmup.append(matching_recv)
+                        recv_buffer.remove(matching_recv)
+
+                reordered_warmup.append(action)
+
+        # Add any remaining RECVs at the end of warmup
+        reordered_warmup.extend(recv_buffer)
+
+        return reordered_warmup + rest
+
+    # Apply reordering to each rank
+    for rank in comm_actions:
+        comm_actions[rank] = _reorder_warmup_comms(comm_actions[rank])
+
     return comm_actions
 
 
