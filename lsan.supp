@@ -9,7 +9,6 @@ leak:obmalloc
 leak:gcmodule
 leak:listobject
 leak:bytesobject
-leak:PyThread_allocate_lock
 leak:sccache
 leak:rustc-1.61.0
 leak:gcc/x86_64-linux-gnu/11
