@@ -1,4 +1,3 @@
-leak:pybind11::cpp_function
 leak:PyMem_RawMalloc
 leak:unicode_resize
 leak:PyObject_Malloc
