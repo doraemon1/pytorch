@@ -2197,6 +2197,21 @@ class OutputGraph(OutputGraphCommon):
                     backend_fake_mode = torch._subclasses.FakeTensorMode(
                         shape_env=old_fake_mode.shape_env,
                     )
+
+                # T165177: We're swapping out the FakeTensorMode here but
+                # reusing the old ShapeEnv. We need to make sure that if we
+                # convert any already-known Tensors they get the same FakeTensor
+                # as before.
+                backend_fake_mode.fake_tensor_converter = old_fake_mode.fake_tensor_converter
+
+                # Also since we're swapping out our FakeTensorMode we need to
+                # tell our existing tracked FakeTensors that they now belong to
+                # the new mode (otherwise it gets confused when the cache
+                # returns old FakeTensors).
+                for t in self.tracked_fakes:
+                    if isinstance(t.fake, FakeTensor):
+                        t.fake.fake_mode = backend_fake_mode
+
                 # TODO(voz): Ostensibily, this should be scoped and
                 # restore back to old_fake_mode, but doing so currently violates
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
