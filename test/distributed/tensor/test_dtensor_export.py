@@ -323,7 +323,7 @@ class DTensorExportTest(TestCase):
         [
             (
                 graph_capture_and_aot_export_joint_with_descriptors_v2,
-                "[[4, 10], [4], [10, 4], [10], [4, 10], [4], [10, 4], [10], [s64, 10], [s64, 10]]",
+                "[[4, 10], [4], [10, 4], [10], [s49, 10], [s49, 10]]",
             ),
             (
                 graph_capture_and_aot_export_joint_with_descriptors,
