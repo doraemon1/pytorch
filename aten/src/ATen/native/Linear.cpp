@@ -51,17 +51,34 @@ static inline bool parseLinearFlatten3d() {
 // before passing it to linear operation
 static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
     const auto input_sizes = input.sym_sizes();
-    // can't use -1 in reshape because it errors when a dimension is 0
-    c10::SymInt flattened_dim = 1;
-    for (int64_t i = 0, ndim = input_sizes.size(); i < ndim - 1; ++i) {
-      flattened_dim = flattened_dim * input_sizes[i];
-    }
-    auto inp_reshape = input.reshape_symint({flattened_dim, input_sizes.at(input_sizes.size() -1)});
-    const auto result = at::addmm(bias, inp_reshape, weight.t());
-    auto new_size = input_sizes.slice(0, input_sizes.size() - 1);
-    c10::SymDimVector sizes_vec(new_size.begin(), new_size.end());
-    sizes_vec.push_back(result.sym_size(1));
-    return result.view_symint(sizes_vec);
+
+    const auto result_flattened = [&]() -> Tensor {
+      const auto input_ncols = input_sizes.back();
+      const auto input_flattened_nrows = [&]() -> c10::SymInt {
+        // can't use -1 in reshape because it errors when a dimension is 0
+        auto flattened_nrows = c10::SymInt{1};
+        for (const auto& size : input_sizes.slice(0, input_sizes.size() - 1)) {
+          flattened_nrows *= size;
+        }
+        return flattened_nrows;
+      }();
+
+      const auto input_flattened = input.reshape_symint({input_flattened_nrows, input_ncols});
+      if (weight.layout() == c10::kStrided) {
+        return at::addmm(bias, input_flattened, weight.mT());
+      } else {
+        // weight is sparse, and addmm for sparse expects matmul lhs to be sparse,
+        // so we transpose the problem.
+        // NOTE: at::matmul handles (dense @ sparse) similarly.
+        const auto bias_t = (bias.dim() >= 2) ? bias.mT() : bias.unsqueeze(-1);
+        return at::addmm(bias_t, weight, input_flattened.mT()).mT();
+      }
+    }();
+
+    // Unflatten flattened row dims
+    auto result_sizes = c10::SymDimVector{input_sizes.begin(), input_sizes.end()};
+    result_sizes.back() = result_flattened.sym_size(1);
+    return result_flattened.view_symint(result_sizes);
 }
 
 
@@ -91,12 +108,9 @@ Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Ten
     return at::addmm(*bias, input, weight.t());
   }
   if (bias->defined() && !input.is_xla()) {
-    // Also hit the fused path for contiguous 3D input, if not using xla
+    // Also hit the fused path for contiguous nD input, if not using xla
     // backend. Reshaping/flattening has some performance implications on xla.
-    bool is_contiguous = input.is_contiguous_or_false();
-    if (is_contiguous && input_dim == 3) {
-      return _flatten_nd_linear(input, weight, *bias);
-    } else if (is_contiguous && input.layout() == c10::kStrided && weight.layout() == c10::kStrided && bias->dim() == 1) {
+    if (input.is_contiguous_or_false()) {
       return _flatten_nd_linear(input, weight, *bias);
     } else if (parseLinearFlatten3d() && input_dim == 3) {
       // If user forces flattening via env var
