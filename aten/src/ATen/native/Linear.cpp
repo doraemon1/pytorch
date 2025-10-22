@@ -71,7 +71,7 @@ static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weigh
         // so we transpose the problem.
         // NOTE: at::matmul handles (dense @ sparse) similarly.
         const auto bias_t = (bias.dim() >= 2) ? bias.mT() : bias.unsqueeze(-1);
-        return at::addmm(bias_t, weight, input_flattened.mT()).mT();
+        return at::addmm(bias_t, weight, input_flattened.mT()).transpose_(-2, -1);
       }
     }();
 
