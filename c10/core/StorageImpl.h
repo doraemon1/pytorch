@@ -105,6 +105,16 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     data_ptr_.clear();
   }
 
+  void retain_wrapper() const override {
+    PyObject *obj = pyobj_slot_._unchecked_untagged_pyobj();
+    (*pyobj_slot_.pyobj_interpreter())->incref(obj);
+  }
+
+  void release_wrapper() const override {
+    PyObject *obj = pyobj_slot_._unchecked_untagged_pyobj();
+    (*pyobj_slot_.pyobj_interpreter())->decref(obj, false);
+  }
+
   size_t nbytes() const {
     // OK to do this instead of maybe_as_int as nbytes is guaranteed positive
     TORCH_CHECK(!size_bytes_is_heap_allocated_);

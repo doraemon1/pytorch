@@ -24,10 +24,6 @@ void PyObjectSlot::maybe_destroy_pyobj() {
   }
 }
 
-PyInterpreter* PyObjectSlot::pyobj_interpreter() {
-  return pyobj_interpreter_.load(std::memory_order_acquire);
-}
-
 PyObject* PyObjectSlot::_unchecked_untagged_pyobj() const {
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
   return reinterpret_cast<PyObject*>(

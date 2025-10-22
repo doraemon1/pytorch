@@ -17,3 +17,7 @@ void clear_slots(PyTypeObject* type, PyObject* self) {
     }
   }
 }
+
+PyObject* wrap(c10::impl::PyObjectSlot* slot) {
+  return nullptr;
+}

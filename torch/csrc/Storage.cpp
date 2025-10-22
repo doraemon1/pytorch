@@ -176,6 +176,13 @@ static bool THPStorage_tryPreserve(THPStorage* self) {
   return true;
 }
 
+static void THPStorage_dealloc(PyObject* self) {
+  THPStorage* _self = (THPStorage*)self;
+  printf("dealloc %p\n", _self);
+  _self->cdata.~MaybeOwned<c10::Storage>();
+  Py_TYPE(_self)->tp_free(self);
+}
+
 static void THPStorage_subclass_dealloc(PyObject* self) {
   THPStorage* _self = (THPStorage*)self;
 
@@ -204,7 +211,7 @@ static void THPStorage_subclass_dealloc(PyObject* self) {
     PyObject_GC_UnTrack(self);
   }
 
-  // base test is unnecessary as THPStorae does not set this
+  // base test is unnecessary as THPStorage does not set this
   if (type->tp_weaklistoffset) {
     PyObject_ClearWeakRefs(self);
   }
@@ -610,7 +617,7 @@ PyTypeObject THPStorageType = {
     "torch._C.StorageBase", /* tp_name */
     sizeof(THPStorage), /* tp_basicsize */
     0, /* tp_itemsize */
-    nullptr, /* tp_dealloc */
+    THPStorage_dealloc, /* tp_dealloc */
     0, /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
@@ -653,7 +660,7 @@ int THPStorageMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
   if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
     return -1;
   }
-  ((PyTypeObject*)cls)->tp_dealloc = (destructor)THPStorage_subclass_dealloc;
+  // ((PyTypeObject*)cls)->tp_dealloc = (destructor)THPStorage_subclass_dealloc;
   return 0;
 }
 

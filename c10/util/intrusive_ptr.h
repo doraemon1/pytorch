@@ -33,6 +33,7 @@ constexpr uint64_t kImpracticallyHugeWeakReferenceCount =
 constexpr uint64_t kReferenceCountOne = 1;
 constexpr uint64_t kWeakReferenceCountOne = (kReferenceCountOne << 32);
 constexpr uint64_t kUniqueRef = (kReferenceCountOne | kWeakReferenceCountOne);
+constexpr uint64_t kHasWrapper = (uint64_t(1) << 63);
 
 template <class TTarget>
 struct intrusive_target_default_null_type final {
@@ -55,7 +56,11 @@ inline uint32_t refcount(uint64_t combined_refcount) {
 }
 
 inline uint32_t weakcount(uint64_t combined_refcount) {
-  return static_cast<uint32_t>(combined_refcount >> 32);
+  return static_cast<uint32_t>((combined_refcount & ~kHasWrapper) >> 32);
+}
+
+inline bool has_wrapper(uint64_t combined_refcount) {
+  return (combined_refcount & kHasWrapper) != 0;
 }
 
 // The only requirement for refcount increment is that it happens-before
@@ -64,12 +69,6 @@ inline uint64_t atomic_combined_refcount_increment(
     std::atomic<uint64_t>& combined_refcount,
     uint64_t inc) {
   return combined_refcount.fetch_add(inc, std::memory_order_relaxed) + inc;
-}
-
-inline uint32_t atomic_refcount_increment(
-    std::atomic<uint64_t>& combined_refcount) {
-  return detail::refcount(atomic_combined_refcount_increment(
-      combined_refcount, kReferenceCountOne));
 }
 
 inline uint32_t atomic_weakcount_increment(
@@ -255,6 +254,9 @@ class C10_API intrusive_ptr_target {
    */
   virtual void release_resources() {}
 
+  virtual void retain_wrapper() const {}
+  virtual void release_wrapper() const {}
+
   uint32_t refcount(std::memory_order order = std::memory_order_relaxed) const {
     return detail::refcount(combined_refcount_.load(order));
   }
@@ -314,11 +316,15 @@ class intrusive_ptr final {
 
   void retain_() {
     if (target_ != NullType::singleton()) {
-      uint32_t new_refcount =
-          detail::atomic_refcount_increment(target_->combined_refcount_);
+      uint64_t combined = detail::atomic_combined_refcount_increment(
+            target_->combined_refcount_, detail::kReferenceCountOne);
+      uint32_t new_refcount = detail::refcount(combined);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_refcount != 1,
           "intrusive_ptr: Cannot increase refcount after it reached zero.");
+      if (C10_UNLIKELY(detail::has_wrapper(combined) && new_refcount == 2)) {
+        target_->retain_wrapper();
+      }
     }
   }
 
@@ -337,9 +343,9 @@ class intrusive_ptr final {
 
       auto combined_refcount = detail::atomic_combined_refcount_decrement(
           target_->combined_refcount_, detail::kReferenceCountOne);
-      if (detail::refcount(combined_refcount) == 0) {
-        bool should_delete =
-            (combined_refcount == detail::kWeakReferenceCountOne);
+      uint32_t new_refcount = detail::refcount(combined_refcount);
+      if (new_refcount == 0) {
+        bool should_delete = detail::weakcount(combined_refcount) == 1;
         // See comment above about weakcount. As long as refcount>0,
         // weakcount is one larger than the actual number of weak references.
         // So we need to decrement it here.
@@ -356,6 +362,8 @@ class intrusive_ptr final {
         if (should_delete) {
           delete target_;
         }
+      } else if (detail::has_wrapper(combined_refcount) && new_refcount == 1) {
+        target_->release_wrapper();
       }
     }
   }
@@ -1060,7 +1068,12 @@ namespace intrusive_ptr {
 // NullType::singleton to this function
 inline void incref(intrusive_ptr_target* self) {
   if (self) {
-    detail::atomic_refcount_increment(self->combined_refcount_);
+    uint64_t new_refcount = detail::atomic_combined_refcount_increment(
+        self->combined_refcount_, detail::kReferenceCountOne);
+    if (C10_UNLIKELY(detail::has_wrapper(new_refcount) &&
+                     detail::refcount(new_refcount) == 2)) {
+      self->retain_wrapper();
+    }
   }
 }
 

@@ -33,7 +33,9 @@ struct C10_API PyObjectSlot {
 
   // Query the PyObject interpreter.  This may return null if there is no
   // interpreter.  This is racy!
-  PyInterpreter* pyobj_interpreter();
+  PyInterpreter* pyobj_interpreter() const {
+    return pyobj_interpreter_.load(std::memory_order_acquire);
+  }
 
   PyObject* _unchecked_untagged_pyobj() const;
 
