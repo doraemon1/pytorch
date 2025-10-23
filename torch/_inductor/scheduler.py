@@ -19,6 +19,7 @@ from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Uni
 from typing_extensions import ParamSpec, TypeAlias
 
 from torch.utils._ordered_set import OrderedSet
+from .ir import ComputedBuffer
 
 
 if TYPE_CHECKING:
@@ -125,11 +126,43 @@ class MixOrderReduction:
     """
 
     @staticmethod
+    def is_split_reduction(node: BaseSchedulerNode):
+        return node.is_reduction() and all(
+            subnode.node._split_size is not None
+            for subnode in node.get_nodes()
+            if isinstance(subnode, SchedulerNode) and subnode.is_reduction() and isinstance(subnode.node, ComputedBuffer)
+        )
+
+    @classmethod
+    def get_numel_rnumel(cls, node: BaseSchedulerNode):
+        if cls.is_split_reduction(node):
+            xnumel = None
+            rnunmel = None
+            for subnode in node.get_nodes():
+                if not(isinstance(subnode, SchedulerNode) and subnode.is_reduction() and isinstance(subnode.node, ComputedBuffer)):
+                    continue
+
+                curxnumel = V.graph.sizevars.simplify(sympy_product(subnode.node._original_ranges))
+                currnumel = V.graph.sizevars.simplify(sympy_product(subnode.node._original_reduction_ranges))
+
+                if xnumel is None:
+                    xnumel = curxnumel
+                    rnumel = currnumel
+                else:
+                    assert V.graph.sizevars.statically_known_equals(xnumel, curxnumel), f"{xnumel} v.s. {curxnumel}"
+                    assert V.graph.sizevars.statically_known_equals(rnumel, currnumel), f"{rnumel} v.s. {currnumel}"
+
+            assert xnumel is not None
+            return (xnumel, rnumel)
+        else:
+            return node.group[1]
+
+    @classmethod
     def has_mix_reduction_orders(
-        node1: BaseSchedulerNode, node2: BaseSchedulerNode
+        cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
-        g1 = node1.group[1]
-        g2 = node2.group[1]
+        g1 = cls.get_numel_rnumel(node1)
+        g2 = cls.get_numel_rnumel(node2)
 
         if len(g1) != 2 or len(g2) != 2 or g1 == g2:
             return False
@@ -209,7 +242,7 @@ class MixOrderReduction:
         if len(common_reads) == 0:
             return False
 
-        g1 = node1.group[1]
+        g1 = cls.get_numel_rnumel(node1)
         nrow = sympy.Max(g1[0], g1[1])
         ncol = sympy.Min(g1[0], g1[1])
 
@@ -220,7 +253,7 @@ class MixOrderReduction:
             return False
 
         contiguous_node, other_node = (
-            (node1, node2) if node1.group[1][1] == ncol else (node2, node1)
+            (node1, node2) if g1[1] == ncol else (node2, node1)
         )
 
         if not all(
@@ -246,7 +279,7 @@ class MixOrderReduction:
 
         # Other reduction types like max/min is not supported yet.
         # There are no real use case as well.
-        return all(
+        out = all(
             subnode.node.get_reduction_type()  # type: ignore[union-attr]
             in {
                 "sum",
@@ -255,6 +288,7 @@ class MixOrderReduction:
             for subnode in other_node.get_nodes()
             if subnode.is_reduction()
         )
+        return out
 
     @classmethod
     def are_mix_order_reductions(
@@ -1448,6 +1482,12 @@ class SchedulerNode(BaseSchedulerNode):
     def extract_pw_from_reduction(self) -> BaseSchedulerNode:
         self._body = self._body.extract_pw_from_reduction()
         return self
+
+    def cancel_reduction_split(self):
+        if not MixOrderReduction.is_split_reduction(self):
+            return
+        with self.node.with_original_inner_fn():
+            self._compute_attrs()
 
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
